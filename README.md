@@ -24,10 +24,10 @@ Regenerate config after changing environment variables: `make cli-config`.
 
 ## Panel deployment (`deployments/panel`)
 
-1. `make panel-run` – same bootstrap flow, but spins up both Xray and 3x-ui (panel).
+1. `make panel-run` – same bootstrap flow, but now only the 3x-ui panel container (with built-in Xray) is started.
 2. Access the panel through SSH tunnel: `ssh -L 4242:127.0.0.1:4242 user@server`, then open `http://localhost:4242`.
-3. Create or import the inbound in 3x-ui; afterwards manage users there. The panel has full write access to `deployments/panel/xray/`.
-4. When you change inbounds/users through the panel, rerun `make panel-up` (or `docker compose -f deployments/panel/docker-compose.yml restart xray`) so the dedicated Xray container reloads the updated config.
+3. Create or import the inbound in 3x-ui; afterwards manage users there. A reference JSON config is still rendered to `deployments/panel/xray/config.json` for manual use.
+4. When you change inbounds/users through the panel, rerun `make panel-up` (or `docker compose -f deployments/panel/docker-compose.yml restart panel`) so the bundled Xray process inside the panel container reloads the updated settings.
 
 Firewall helpers:
 

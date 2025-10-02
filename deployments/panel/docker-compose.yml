@@ -1,25 +1,10 @@
 services:
-  xray:
-    image: ${XRAY_IMAGE:-ghcr.io/xtls/xray-core:latest}
-    container_name: xray-panel
-    restart: unless-stopped
-    ports:
-      - "${XRAY_PORT:-443}:443/tcp"
-    cap_drop: [ "ALL" ]
-    cap_add:  [ "NET_BIND_SERVICE" ]
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - ./xray/:/usr/local/etc/xray/
-
   panel:
     image: ${PANEL_IMAGE:-ghcr.io/mhsanaei/3x-ui:latest}
     container_name: 3x-ui
     restart: unless-stopped
     ports:
+      - "${XRAY_PORT:-443}:443/tcp"
       - "127.0.0.1:${PANEL_PORT:-4242}:2053/tcp"
-    depends_on:
-      - xray
     volumes:
-      - ./xray/:/usr/local/etc/xray/
       - ./3xui-data/:/etc/x-ui/

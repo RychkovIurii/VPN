@@ -128,7 +128,7 @@ check-sni: ## validate SNI TLS/ALPN (scripts/validate_sni.sh)
 gen-keys: ## generate x25519 (pub/priv), UUID, shortId → .env
 	bash $(SCRIPTS_DIR)/gen_keys.sh "$(XRAY_IMAGE)"
 
-config: ## render xray/config.json from template + .env
+config: ## render reference xray/config.json from template + .env
 	[ -f $(ENV_FILE) ] || { echo ".env missing. Run: make ask-sni gen-keys"; exit 1; }
 	set -a
 	. ./$(ENV_FILE)
@@ -145,7 +145,7 @@ config: ## render xray/config.json from template + .env
 	done
 	mkdir -p $(XRAY_DIR)
 	envsubst '$$XRAY_PORT $$UUID $$DEST $$SNI $$XR_PRIVKEY $$SHORTID' < $(TEMPLATES_DIR)/config.json.tpl > $(XRAY_DIR)/config.json
-	echo "Wrote $(XRAY_DIR)/config.json"
+	echo "Updated reference $(XRAY_DIR)/config.json"
 
 up: config ## docker compose up -d
 	DOCKER_DEFAULT_PLATFORM= docker compose up -d
@@ -183,8 +183,8 @@ down: ## docker compose down
 restart: ## restart services
 	docker compose restart
 
-logs: ## tail xray logs
-	docker logs -f xray-panel
+logs: ## tail panel logs
+	docker logs -f 3x-ui
 
 status: ## docker compose ps
 	docker compose ps
