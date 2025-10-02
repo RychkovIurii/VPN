@@ -132,6 +132,8 @@ config: ## render xray/config.json from template + .env
 	[ -f $(ENV_FILE) ] || { echo ".env missing. Run: make ask-sni gen-keys"; exit 1; }
 	set -a
 	. ./$(ENV_FILE)
+	XRAY_PORT="$${XRAY_PORT:-$(XRAY_PORT_DEFAULT)}"
+	export XRAY_PORT
 	set +a
 	required="SNI DEST UUID XR_PRIVKEY SHORTID"
 	for var in $$required; do \
@@ -141,7 +143,6 @@ config: ## render xray/config.json from template + .env
 	    exit 1; \
 	  fi; \
 	done
-	XRAY_PORT="${XRAY_PORT:-$(XRAY_PORT_DEFAULT)}"
 	mkdir -p $(XRAY_DIR)
 	envsubst '$$XRAY_PORT $$UUID $$DEST $$SNI $$XR_PRIVKEY $$SHORTID' < $(TEMPLATES_DIR)/config.json.tpl > $(XRAY_DIR)/config.json
 	echo "Wrote $(XRAY_DIR)/config.json"
