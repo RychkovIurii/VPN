@@ -22,4 +22,5 @@ services:
       - xray
     volumes:
       - ./xray/:/usr/local/etc/xray/
+      - ./xray/config.json:/app/bin/config.json
       - ./3xui-data/:/etc/x-ui/

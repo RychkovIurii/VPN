@@ -128,24 +128,28 @@ check-sni: ## validate SNI TLS/ALPN (scripts/validate_sni.sh)
 gen-keys: ## generate x25519 (pub/priv), UUID, shortId → .env
 	bash $(SCRIPTS_DIR)/gen_keys.sh "$(XRAY_IMAGE)"
 
-config: ## render xray/config.json from template + .env
-	[ -f $(ENV_FILE) ] || { echo ".env missing. Run: make ask-sni gen-keys"; exit 1; }
-	set -a
-	. ./$(ENV_FILE)
-	XRAY_PORT="$${XRAY_PORT:-$(XRAY_PORT_DEFAULT)}"
-	export XRAY_PORT
-	set +a
-	required="SNI DEST UUID XR_PRIVKEY SHORTID"
-	for var in $$required; do \
-	  eval "val=\$${var}"; \
-	  if [ -z "$$val" ]; then \
-	    echo "Missing $$var in .env. Run: make ask-sni gen-keys"; \
-	    exit 1; \
-	  fi; \
-	done
-	mkdir -p $(XRAY_DIR)
-	envsubst '$$XRAY_PORT $$UUID $$DEST $$SNI $$XR_PRIVKEY $$SHORTID' < $(TEMPLATES_DIR)/config.json.tpl > $(XRAY_DIR)/config.json
-	echo "Wrote $(XRAY_DIR)/config.json"
+config: ## ensure xray/config.json exists for first boot
+	if [ ! -f $(XRAY_DIR)/config.json ]; then \
+	  [ -f $(ENV_FILE) ] || { echo ".env missing. Run: make ask-sni gen-keys"; exit 1; }; \
+	  set -a; \
+	  . ./$(ENV_FILE); \
+	  XRAY_PORT="$${XRAY_PORT:-$(XRAY_PORT_DEFAULT)}"; \
+	  export XRAY_PORT; \
+	  set +a; \
+	  required="SNI DEST UUID XR_PRIVKEY SHORTID"; \
+	  for var in $$required; do \
+	    eval "val=\$${var}"; \
+	    if [ -z "$$val" ]; then \
+	      echo "Missing $$var in .env. Run: make ask-sni gen-keys"; \
+	      exit 1; \
+	    fi; \
+	  done; \
+	  mkdir -p $(XRAY_DIR); \
+	  envsubst '$$XRAY_PORT $$UUID $$DEST $$SNI $$XR_PRIVKEY $$SHORTID' < $(TEMPLATES_DIR)/config.json.tpl > $(XRAY_DIR)/config.json; \
+	  echo "Seeded $(XRAY_DIR)/config.json"; \
+	else \
+	  echo "Reusing existing $(XRAY_DIR)/config.json (managed by panel)"; \
+	fi
 
 up: config ## docker compose up -d
 	DOCKER_DEFAULT_PLATFORM= docker compose up -d
