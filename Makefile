@@ -24,11 +24,20 @@ help: ## show targets
 init: ## create folders & check tools
 	touch .env
 	mkdir -p xray templates scripts 3xui-data
-	# Require docker, docker compose plugin, openssl, curl, envsubst
-	command -v docker >/dev/null || { echo "docker not found"; exit 1; }
-	docker compose version >/dev/null 2>&1 || { echo "docker compose plugin not found (install Docker Compose v2)"; exit 1; }
+	# Ensure docker & compose
+	if ! command -v docker >/dev/null; then \
+	  echo "docker not found; attempting automatic install"; \
+	  bash scripts/install_docker.sh docker || { echo "failed to install docker"; exit 1; }; \
+	fi
+	command -v docker >/dev/null || { echo "docker still missing after install"; exit 1; }
+	if ! docker compose version >/dev/null 2>&1; then \
+	  echo "docker compose plugin not found; attempting automatic install"; \
+	  bash scripts/install_docker.sh compose || { echo "failed to install docker compose plugin"; exit 1; }; \
+	fi
+	docker compose version >/dev/null 2>&1 || { echo "docker compose plugin still missing"; exit 1; }
+	# Other tools
 	command -v openssl >/dev/null || { echo "openssl not found"; exit 1; }
-	command -v curl >/dev/null || { echo "curl not found"; exit 1; }
+	command -v curl >/dev/null || command -v wget >/dev/null || { echo "curl or wget required"; exit 1; }
 	command -v envsubst >/dev/null || { echo "envsubst not found (install gettext-base)"; exit 1; }
 
 ask-sni: ## prompt SNI (decoy domain), write .env
