@@ -142,6 +142,26 @@ config: ## render xray/config.json from template + .env
 up: config ## docker compose up -d
 	DOCKER_DEFAULT_PLATFORM= docker compose up -d
 	HOST_VALUE=$(awk -F= '/^XRAY_HOST=/{print $$2; exit}' $(ENV_FILE) 2>/dev/null)
+	if [ -z "$$HOST_VALUE" ]; then \
+	  HOST_VALUE=$(awk -F= '/^SNI=/{print $$2; exit}' $(ENV_FILE) 2>/dev/null); \
+	fi; \
+	if [ -z "$$HOST_VALUE" ]; then \
+	  detect_ipv4() { \
+	    local ip=""; \
+	    if command -v curl >/dev/null; then \
+	      ip=$$(curl -4 -fsS --retry 2 https://ifconfig.me 2>/dev/null || true); \
+	      [ -z "$$ip" ] && ip=$$(curl -4 -fsS --retry 2 https://ifconfig.co 2>/dev/null || true); \
+	    fi; \
+	    if [ -z "$$ip" ] && command -v wget >/dev/null; then \
+	      ip=$$(wget -qO- -4 https://ifconfig.me 2>/dev/null || true); \
+	    fi; \
+	    if [ -z "$$ip" ] && command -v dig >/dev/null; then \
+	      ip=$$(dig +short -4 myip.opendns.com @resolver1.opendns.com 2>/dev/null || true); \
+	    fi; \
+	    printf '%s' "$$ip"; \
+	  }; \
+	  HOST_VALUE=$$(detect_ipv4); \
+	fi
 	[ -n "$$HOST_VALUE" ] || HOST_VALUE="<SERVER_IP>"
 	XRAY_PORT_VALUE=$(awk -F= '/^XRAY_PORT=/{print $$2; exit}' $(ENV_FILE) 2>/dev/null)
 	[ -n "$$XRAY_PORT_VALUE" ] || XRAY_PORT_VALUE="$(XRAY_PORT_DEFAULT)"
