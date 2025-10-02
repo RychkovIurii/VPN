@@ -2,9 +2,9 @@ SHELL := /usr/bin/env
 .SHELLFLAGS := bash -eu -o pipefail -c
 .ONESHELL:
 .SILENT:
-.PHONY: help init ask-sni check-sni gen-keys config up down restart logs status clean show-client bootstrap
+.PHONY: help init ask-sni check-sni gen-keys config up down restart logs status clean show-client bootstrap run
 
-DEFAULT_GOAL := help
+DEFAULT_GOAL := run
 
 # Load .env if present
 -include .env
@@ -108,6 +108,8 @@ show-client: ## print vless:// import URI (for v2rayN/NG)
 
 bootstrap: init ask-sni gen-keys up ## provision & start everything
 
+run: bootstrap ## default alias for bootstrap
+
 fw-open-xray: ## allow 443/tcp for Xray
 	sudo ufw allow 443/tcp
 
@@ -124,3 +126,8 @@ fw-close-panel: ## remove any 4242 rules
 
 clean: ## remove generated files (keeps .env)
 	rm -f xray/config.json
+
+.DEFAULT:
+	printf "Unknown target '%s'.\\n" "$@"
+	$(MAKE) help 2>/dev/null || true
+	exit 1
