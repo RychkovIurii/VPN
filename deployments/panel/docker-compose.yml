@@ -17,7 +17,7 @@ services:
     container_name: 3x-ui
     restart: unless-stopped
     ports:
-      - "${PANEL_PORT:-4242}:2053/tcp"
+      - "127.0.0.1:${PANEL_PORT:-4242}:2053/tcp"
     depends_on:
       - xray
     volumes:
