@@ -57,7 +57,7 @@ ask-sni: ## prompt SNI (decoy domain), write .env
 	  SNI_VALUE=$(awk -F= '/^SNI=/{print $$2; exit}' .env); \
 	fi; \
 	if [ -z "$$SNI_VALUE" ]; then \
-	  read -p "Enter SNI (e.g. www.cloudflare.com): " SNI_VALUE; \
+	  read -p "Enter SNI (e.g. www.example.com): " SNI_VALUE; \
 	else \
 	  echo "Using existing SNI=$$SNI_VALUE"; \
 	fi; \
