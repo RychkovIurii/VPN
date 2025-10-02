@@ -4,20 +4,22 @@ SHELL := /usr/bin/env
 .SILENT:
 .PHONY: help init ask-sni check-sni gen-keys config up down restart logs status clean fclean show-client bootstrap run
 
-DEFAULT_GOAL := run
+.DEFAULT_GOAL := run
 
-# Load .env if present
--include .env
-
-# Defaults
-PANEL_PORT ?= 4242
-XRAY_PORT  ?= 443
+# Constants / defaults
+PANEL_PORT_DEFAULT := 4242
+XRAY_PORT_DEFAULT  := 443
 XRAY_IMAGE ?= ghcr.io/xtls/xray-core:latest
 PANEL_IMAGE ?= ghcr.io/mhsanaei/3x-ui:latest
 
 # ---- firewall helpers (UFW) ----
 MY_IP      ?= 1.2.3.4      # set your workstation’s public IP here
-HOST_HINT := $(if $(strip $(XRAY_HOST)),$(strip $(XRAY_HOST)),<SERVER_IP>)
+HOST_HINT_RAW := $(shell [ -f .env ] && grep -E '^XRAY_HOST=' .env | tail -n1 | cut -d= -f2- )
+HOST_HINT := $(if $(strip $(HOST_HINT_RAW)),$(strip $(HOST_HINT_RAW)),<SERVER_IP>)
+PANEL_PORT_HINT_RAW := $(shell [ -f .env ] && grep -E '^PANEL_PORT=' .env | tail -n1 | cut -d= -f2- )
+PANEL_PORT_HINT := $(if $(strip $(PANEL_PORT_HINT_RAW)),$(strip $(PANEL_PORT_HINT_RAW)),$(PANEL_PORT_DEFAULT))
+XRAY_PORT_HINT_RAW := $(shell [ -f .env ] && grep -E '^XRAY_PORT=' .env | tail -n1 | cut -d= -f2- )
+XRAY_PORT_HINT := $(if $(strip $(XRAY_PORT_HINT_RAW)),$(strip $(XRAY_PORT_HINT_RAW)),$(XRAY_PORT_DEFAULT))
 
 help: ## show targets
 	echo "Usage: make <target>"
@@ -26,6 +28,7 @@ help: ## show targets
 
 
 init: ## create folders & check tools
+	touch .env
 	mkdir -p xray templates scripts 3xui-data
 	# Require docker, docker compose plugin, openssl, curl, envsubst
 	command -v docker >/dev/null || { echo "docker not found"; exit 1; }
@@ -35,17 +38,37 @@ init: ## create folders & check tools
 	command -v envsubst >/dev/null || { echo "envsubst not found (install gettext-base)"; exit 1; }
 
 ask-sni: ## prompt SNI (decoy domain), write .env
+	valid_host() { \
+	  local candidate="$$1"; \
+	  local domain_re='^([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$$'; \
+	  local ipv4_re='^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$$'; \
+	  [[ "$$candidate" =~ $$domain_re ]] || [[ "$$candidate" =~ $$ipv4_re ]]; \
+	}; \
 	SNI_VALUE="$(strip $(SNI))"; \
+	if [ -z "$$SNI_VALUE" ] && [ -f .env ]; then \
+	  SNI_VALUE=$(awk -F= '/^SNI=/{print $$2; exit}' .env); \
+	fi; \
 	if [ -z "$$SNI_VALUE" ]; then \
 	  read -p "Enter SNI (e.g. www.cloudflare.com): " SNI_VALUE; \
 	else \
 	  echo "Using existing SNI=$$SNI_VALUE"; \
 	fi; \
+	if ! valid_host "$$SNI_VALUE"; then \
+	  echo "Invalid SNI '$$SNI_VALUE'. Use domain/IP like www.example.com"; \
+	  exit 1; \
+	fi; \
 	XRAY_HOST_VALUE="$(strip $(XRAY_HOST))"; \
+	if [ -z "$$XRAY_HOST_VALUE" ] && [ -f .env ]; then \
+	  XRAY_HOST_VALUE=$(awk -F= '/^XRAY_HOST=/{print $$2; exit}' .env); \
+	fi; \
 	if [ -z "$$XRAY_HOST_VALUE" ]; then \
 	  read -p "Enter your server host/IP for clients: " XRAY_HOST_VALUE; \
 	else \
 	  echo "Using existing XRAY_HOST=$$XRAY_HOST_VALUE"; \
+	fi; \
+	if ! valid_host "$$XRAY_HOST_VALUE"; then \
+	  echo "Invalid XRAY_HOST '$$XRAY_HOST_VALUE'. Use domain/IP like vpn.example.com"; \
+	  exit 1; \
 	fi; \
 	tmp=.env.tmp; \
 	trap 'rm -f "$$tmp"' EXIT; \
@@ -62,34 +85,56 @@ ask-sni: ## prompt SNI (decoy domain), write .env
 	    echo "$$k=$$v" >> "$$tmp"; \
 	  fi; \
 	}; \
+	PANEL_PORT_VALUE="$(strip $(PANEL_PORT))"; \
+	if [ -z "$$PANEL_PORT_VALUE" ] && grep -q '^PANEL_PORT=' "$$tmp"; then \
+	  PANEL_PORT_VALUE=$(awk -F= '/^PANEL_PORT=/{print $$2; exit}' "$$tmp"); \
+	fi; \
+	PANEL_PORT_VALUE="$${PANEL_PORT_VALUE:-$(PANEL_PORT_DEFAULT)}"; \
+	XRAY_PORT_VALUE="$(strip $(XRAY_PORT))"; \
+	if [ -z "$$XRAY_PORT_VALUE" ] && grep -q '^XRAY_PORT=' "$$tmp"; then \
+	  XRAY_PORT_VALUE=$(awk -F= '/^XRAY_PORT=/{print $$2; exit}' "$$tmp"); \
+	fi; \
+	XRAY_PORT_VALUE="$${XRAY_PORT_VALUE:-$(XRAY_PORT_DEFAULT)}"; \
 	upsert SNI "$$SNI_VALUE"; \
-	upsert DEST "$$SNI_VALUE:443"; \
-	upsert PANEL_PORT "$(PANEL_PORT)"; \
-	upsert XRAY_PORT "$(XRAY_PORT)"; \
+	upsert DEST "$$SNI_VALUE:$${XRAY_PORT_VALUE}"; \
+	upsert PANEL_PORT "$$PANEL_PORT_VALUE"; \
+	upsert XRAY_PORT "$$XRAY_PORT_VALUE"; \
 	upsert XRAY_HOST "$$XRAY_HOST_VALUE"; \
 	mv "$$tmp" .env; \
 	trap - EXIT; \
 	echo "Saved SNI=$$SNI_VALUE XRAY_HOST=$$XRAY_HOST_VALUE to .env"
 
 check-sni: ## validate SNI TLS/ALPN (scripts/validate_sni.sh)
-	[ -n "$(SNI)" ] || { echo "SNI is empty. Run: make ask-sni"; exit 1; }
-	bash scripts/validate_sni.sh "$(SNI)"
+	[ -f .env ] || { echo ".env missing. Run: make ask-sni"; exit 1; }
+	SNI_VALUE=$(awk -F= '/^SNI=/{print $$2; exit}' .env)
+	[ -n "$$SNI_VALUE" ] || { echo "SNI is empty. Run: make ask-sni"; exit 1; }
+	bash scripts/validate_sni.sh "$$SNI_VALUE"
 
 gen-keys: ## generate x25519 (pub/priv), UUID, shortId → .env
 	bash scripts/gen_keys.sh "$(XRAY_IMAGE)"
 
 config: ## render xray/config.json from template + .env
 	[ -f .env ] || { echo ".env missing. Run: make ask-sni gen-keys"; exit 1; }
-	[ -n "$(SNI)" -a -n "$(DEST)" -a -n "$(UUID)" -a -n "$(XR_PRIVKEY)" -a -n "$(SHORTID)" ] || \
-	  { echo "Missing vars. Do: make ask-sni gen-keys"; exit 1; }
+	set -a
+	. ./.env
+	set +a
+	required_vars="SNI DEST UUID XR_PRIVKEY SHORTID"
+	for var in $$required_vars; do \
+	  eval "val=\$${var}"; \
+	  if [ -z "$$val" ]; then \
+	    echo "Missing $$var in .env. Run: make ask-sni gen-keys"; \
+	    exit 1; \
+	  fi; \
+	done
+	XRAY_PORT="$${XRAY_PORT:-$(XRAY_PORT_DEFAULT)}"
+	PANEL_PORT="$${PANEL_PORT:-$(PANEL_PORT_DEFAULT)}"
 	mkdir -p xray
-	export SNI="$(SNI)" DEST="$(DEST)" UUID="$(UUID)" XR_PRIVKEY="$(XR_PRIVKEY)" SHORTID="$(SHORTID)" XRAY_PORT="$(XRAY_PORT)"; \
-	envsubst < templates/config.json.tpl > xray/config.json
+	envsubst '$$XRAY_PORT $$UUID $$DEST $$SNI $$XR_PRIVKEY $$SHORTID' < templates/config.json.tpl > xray/config.json
 	echo "Wrote xray/config.json"
 
 up: config ## docker compose up -d
 	DOCKER_DEFAULT_PLATFORM= docker compose up -d
-	echo "Panel: http://$(HOST_HINT):$(PANEL_PORT)   Xray: $(HOST_HINT):$(XRAY_PORT)"
+	echo "Panel: http://$(HOST_HINT):$(PANEL_PORT_HINT)   Xray: $(HOST_HINT):$(XRAY_PORT_HINT)"
 
 down: ## docker compose down
 	docker compose down
@@ -125,7 +170,7 @@ fw-close-panel: ## remove any 4242 rules
 	sudo ufw status | grep 4242 || true
 
 clean: ## remove generated files (keeps .env)
-	rm -f xray/config.json
+	rm -f xray/config.json .env.tmp
 
 fclean: ## stop and purge containers, volumes, images, data
 	docker compose down --volumes --remove-orphans || true
@@ -133,6 +178,13 @@ fclean: ## stop and purge containers, volumes, images, data
 	rm -rf xray/config.json 3xui-data
 
 .DEFAULT:
-	printf "Unknown target '%s'.\\n" "$@"
-	$(MAKE) help 2>/dev/null || true
-	exit 1
+	case " $(MAKECMDGOALS) " in \
+	  *" $@ "*) \
+	    printf "Unknown target '%s'.\\n" "$@"; \
+	    $(MAKE) help 2>/dev/null || true; \
+	    exit 1; \
+	    ;; \
+	  *) \
+	    exit 0; \
+	    ;; \
+	esac
