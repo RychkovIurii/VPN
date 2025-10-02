@@ -3,12 +3,12 @@
   "inbounds": [
     {
       "tag": "vless-reality-in",
-      "port": ,
+      "port": ${XRAY_PORT},
       "protocol": "vless",
       "settings": {
         "clients": [
           {
-            "id": "09f58d45-d231-4d6f-883a-d17e0f9a01cf",
+            "id": "${UUID}",
             "flow": "xtls-rprx-vision"
           }
         ],
@@ -19,11 +19,11 @@
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "dest": "www.pogo.com:443",
+          "dest": "${DEST}",
           "xver": 0,
-          "serverNames": ["www.pogo.com"],
-          "privateKey": "2AJJBsVDop706892-lfEmDmOsuMg91YfhgJOhKjXz30",
-          "shortIds": ["4a1845ea2ef235cc"],
+          "serverNames": ["${SNI}"],
+          "privateKey": "${XR_PRIVKEY}",
+          "shortIds": ["${SHORTID}"],
           "spiderX": "/"
         }
       },
