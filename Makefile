@@ -2,7 +2,7 @@ SHELL := /usr/bin/env
 .SHELLFLAGS := bash -eu -o pipefail -c
 .ONESHELL:
 .SILENT:
-.PHONY: help init ask-sni check-sni gen-keys config up down restart logs status clean show-client bootstrap run
+.PHONY: help init ask-sni check-sni gen-keys config up down restart logs status clean fclean show-client bootstrap run
 
 DEFAULT_GOAL := run
 
@@ -126,6 +126,11 @@ fw-close-panel: ## remove any 4242 rules
 
 clean: ## remove generated files (keeps .env)
 	rm -f xray/config.json
+
+fclean: ## stop and purge containers, volumes, images, data
+	docker compose down --volumes --remove-orphans || true
+	docker image rm -f $(XRAY_IMAGE) $(PANEL_IMAGE) 2>/dev/null || true
+	rm -rf xray/config.json 3xui-data
 
 .DEFAULT:
 	printf "Unknown target '%s'.\\n" "$@"
