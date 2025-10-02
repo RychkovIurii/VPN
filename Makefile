@@ -13,13 +13,7 @@ XRAY_IMAGE ?= ghcr.io/xtls/xray-core:latest
 PANEL_IMAGE ?= ghcr.io/mhsanaei/3x-ui:latest
 
 # ---- firewall helpers (UFW) ----
-MY_IP      ?= 1.2.3.4      # set your workstation’s public IP here
-HOST_HINT_RAW := $(shell [ -f .env ] && grep -E '^XRAY_HOST=' .env | tail -n1 | cut -d= -f2- )
-HOST_HINT := $(if $(strip $(HOST_HINT_RAW)),$(strip $(HOST_HINT_RAW)),<SERVER_IP>)
-PANEL_PORT_HINT_RAW := $(shell [ -f .env ] && grep -E '^PANEL_PORT=' .env | tail -n1 | cut -d= -f2- )
-PANEL_PORT_HINT := $(if $(strip $(PANEL_PORT_HINT_RAW)),$(strip $(PANEL_PORT_HINT_RAW)),$(PANEL_PORT_DEFAULT))
-XRAY_PORT_HINT_RAW := $(shell [ -f .env ] && grep -E '^XRAY_PORT=' .env | tail -n1 | cut -d= -f2- )
-XRAY_PORT_HINT := $(if $(strip $(XRAY_PORT_HINT_RAW)),$(strip $(XRAY_PORT_HINT_RAW)),$(XRAY_PORT_DEFAULT))
+MY_IP      ?=              # override if auto-detect fails
 
 help: ## show targets
 	echo "Usage: make <target>"
@@ -44,6 +38,20 @@ ask-sni: ## prompt SNI (decoy domain), write .env
 	  local ipv4_re='^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$$'; \
 	  [[ "$$candidate" =~ $$domain_re ]] || [[ "$$candidate" =~ $$ipv4_re ]]; \
 	}; \
+	detect_ipv4() { \
+	  local ip=""; \
+	  if command -v curl >/dev/null; then \
+	    ip=$$(curl -4 -fsS --retry 2 https://ifconfig.me 2>/dev/null || true); \
+	    [ -z "$$ip" ] && ip=$$(curl -4 -fsS --retry 2 https://ifconfig.co 2>/dev/null || true); \
+	  fi; \
+	  if [ -z "$$ip" ] && command -v wget >/dev/null; then \
+	    ip=$$(wget -qO- -4 https://ifconfig.me 2>/dev/null || true); \
+	  fi; \
+	  if [ -z "$$ip" ] && command -v dig >/dev/null; then \
+	    ip=$$(dig +short -4 myip.opendns.com @resolver1.opendns.com 2>/dev/null || true); \
+	  fi; \
+	  printf '%s' "$$ip"; \
+	}; \
 	SNI_VALUE="$(strip $(SNI))"; \
 	if [ -z "$$SNI_VALUE" ] && [ -f .env ]; then \
 	  SNI_VALUE=$(awk -F= '/^SNI=/{print $$2; exit}' .env); \
@@ -60,6 +68,12 @@ ask-sni: ## prompt SNI (decoy domain), write .env
 	XRAY_HOST_VALUE="$(strip $(XRAY_HOST))"; \
 	if [ -z "$$XRAY_HOST_VALUE" ] && [ -f .env ]; then \
 	  XRAY_HOST_VALUE=$(awk -F= '/^XRAY_HOST=/{print $$2; exit}' .env); \
+	fi; \
+	if [ -z "$$XRAY_HOST_VALUE" ]; then \
+	  XRAY_HOST_VALUE=$$(detect_ipv4); \
+	  if [ -n "$$XRAY_HOST_VALUE" ]; then \
+	    echo "Detected XRAY_HOST=$$XRAY_HOST_VALUE"; \
+	  fi; \
 	fi; \
 	if [ -z "$$XRAY_HOST_VALUE" ]; then \
 	  read -p "Enter your server host/IP for clients: " XRAY_HOST_VALUE; \
@@ -134,7 +148,13 @@ config: ## render xray/config.json from template + .env
 
 up: config ## docker compose up -d
 	DOCKER_DEFAULT_PLATFORM= docker compose up -d
-	echo "Panel: http://$(HOST_HINT):$(PANEL_PORT_HINT)   Xray: $(HOST_HINT):$(XRAY_PORT_HINT)"
+	HOST_VALUE=$$(awk -F= '/^XRAY_HOST=/{print $$2; exit}' .env 2>/dev/null)
+	[ -n "$$HOST_VALUE" ] || HOST_VALUE="<SERVER_IP>"
+	PANEL_PORT_VALUE=$$(awk -F= '/^PANEL_PORT=/{print $$2; exit}' .env 2>/dev/null)
+	[ -n "$$PANEL_PORT_VALUE" ] || PANEL_PORT_VALUE="$(PANEL_PORT_DEFAULT)"
+	XRAY_PORT_VALUE=$$(awk -F= '/^XRAY_PORT=/{print $$2; exit}' .env 2>/dev/null)
+	[ -n "$$XRAY_PORT_VALUE" ] || XRAY_PORT_VALUE="$(XRAY_PORT_DEFAULT)"
+	echo "Panel: http://$$HOST_VALUE:$$PANEL_PORT_VALUE   Xray: $$HOST_VALUE:$$XRAY_PORT_VALUE"
 
 down: ## docker compose down
 	docker compose down
@@ -158,16 +178,42 @@ run: bootstrap ## default alias for bootstrap
 fw-open-xray: ## allow 443/tcp for Xray
 	sudo ufw allow 443/tcp
 
-fw-open-panel-ip: ## allow 4242/tcp only from MY_IP
-	test "$(MY_IP)" != "" || { echo "Set MY_IP=your.ip.addr"; exit 1; }
-	sudo ufw delete allow 4242/tcp || true
-	sudo ufw allow from $(MY_IP) to any port 4242 proto tcp
-	sudo ufw status | grep 4242 || true
+fw-open-panel-ip: ## allow panel port only from your public IP
+	MY_IP_VALUE="$(strip $(MY_IP))"
+	if [ -z "$$MY_IP_VALUE" ]; then \
+	  detect_ipv4() { \
+	    local ip=""; \
+	    if command -v curl >/dev/null; then \
+	      ip=$$(curl -4 -fsS --retry 2 https://ifconfig.me 2>/dev/null || true); \
+	      [ -z "$$ip" ] && ip=$$(curl -4 -fsS --retry 2 https://ifconfig.co 2>/dev/null || true); \
+	    fi; \
+	    if [ -z "$$ip" ] && command -v wget >/dev/null; then \
+	      ip=$$(wget -qO- -4 https://ifconfig.me 2>/dev/null || true); \
+	    fi; \
+	    if [ -z "$$ip" ] && command -v dig >/dev/null; then \
+	      ip=$$(dig +short -4 myip.opendns.com @resolver1.opendns.com 2>/dev/null || true); \
+	    fi; \
+	    printf '%s' "$$ip"; \
+	  }; \
+	  MY_IP_VALUE=$$(detect_ipv4); \
+	fi
+	if [ -z "$$MY_IP_VALUE" ]; then \
+	  echo "Unable to auto-detect MY_IP. Re-run as MY_IP=your.ip make fw-open-panel-ip"; \
+	  exit 1; \
+	fi
+	echo "Using MY_IP=$$MY_IP_VALUE"
+	PANEL_PORT_VALUE=$$(awk -F= '/^PANEL_PORT=/{print $$2; exit}' .env 2>/dev/null)
+	[ -n "$$PANEL_PORT_VALUE" ] || PANEL_PORT_VALUE="$(PANEL_PORT_DEFAULT)"
+	sudo ufw delete allow $$PANEL_PORT_VALUE/tcp || true
+	sudo ufw allow from $$MY_IP_VALUE to any port $$PANEL_PORT_VALUE proto tcp
+	sudo ufw status | grep $$PANEL_PORT_VALUE || true
 
-fw-close-panel: ## remove any 4242 rules
-	# This removes all 4242 allows (idempotent)
-	sudo ufw status numbered | awk '/4242\/tcp/ {print $2}' | tr -d '[]' | sort -nr | xargs -r -I{} sudo ufw --force delete {}
-	sudo ufw status | grep 4242 || true
+fw-close-panel: ## remove panel port rules
+	# This removes all allows for the panel port (idempotent)
+	PANEL_PORT_VALUE=$$(awk -F= '/^PANEL_PORT=/{print $$2; exit}' .env 2>/dev/null)
+	[ -n "$$PANEL_PORT_VALUE" ] || PANEL_PORT_VALUE="$(PANEL_PORT_DEFAULT)"
+	sudo ufw status numbered | awk -v port="$$PANEL_PORT_VALUE" '$0 ~ port"/tcp" {print $2}' | tr -d '[]' | sort -nr | xargs -r -I{} sudo ufw --force delete {}
+	sudo ufw status | grep $$PANEL_PORT_VALUE || true
 
 clean: ## remove generated files (keeps .env)
 	rm -f xray/config.json .env.tmp
